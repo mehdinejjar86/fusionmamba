@@ -172,7 +172,7 @@ def test_with_gan():
     backbone_cfg, multiscale_cfg = init_model_config(F=16, depth=[2,2,2,3,3], M=False)
     vfi_core = MultiScaleFlow(mamba_extractor(**backbone_cfg), **multiscale_cfg).to(device).train()
     
-    B, N, H, W = 1, 3, 2048, 2048
+    B, N, H, W = 1, 3, 3072, 3072
     fusion = build_fusion_net_vfi(base_channels=48, vfi_core=vfi_core).to(device).train()
     
     # Loss with GAN

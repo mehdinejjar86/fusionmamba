@@ -22,7 +22,6 @@ class VFIMambaAdapter(torch.nn.Module):
         self.down_scale = float(down_scale)
         self.local = bool(local)
 
-    @torch.no_grad()
     def forward(self, I0b, I1b, tb):
         """
         I0b, I1b: [BN, 3, H, W], tb: [BN, 1] or [BN, 1, 1, 1] with values in [0,1]
