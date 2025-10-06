@@ -2,7 +2,7 @@
 import torch
 import torch.nn.functional as F
 
-from model.warplayer import warp as warp_vfi
+from model.vfimamba.warplayer import warp as warp_vfi
 
 class VFIMambaAdapter(torch.nn.Module):
     """

@@ -4,11 +4,11 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 
-from model.vfi_adapter import VFIMambaAdapter
-from model.warplayer import warp as warp_vfi 
-from model.utils import ConvBlock, LearnedUpsampling, DetailAwareResBlock
-from model.temporal import TemporalWeightingMLP
-from model.pyramid import PyramidCrossAttention
+from model.vfimamba.vfi_adapter import VFIMambaAdapter
+from model.vfimamba.warplayer import warp as warp_vfi 
+from model.fusion.utils import ConvBlock, LearnedUpsampling, DetailAwareResBlock
+from model.fusion.temporal import TemporalWeightingMLP
+from model.fusion.pyramid import PyramidCrossAttention
 
 
 class AnchorFusionNetVFI(nn.Module):

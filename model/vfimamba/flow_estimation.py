@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import random
 
-from model.warplayer import warp
-from model.refine import *
+from model.vfimamba.warplayer import warp
+from model.vfimamba.refine import *
 
 def conv(in_planes, out_planes, kernel_size=3, stride=1, padding=1, dilation=1):
     return nn.Sequential(

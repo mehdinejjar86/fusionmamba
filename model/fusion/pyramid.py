@@ -3,7 +3,7 @@
 
 import torch.nn as nn
 import torch
-from model.utils import AdaptiveFrequencyDecoupling
+from model.fusion.utils import AdaptiveFrequencyDecoupling
 import torch.nn.functional as F
 import math
 
