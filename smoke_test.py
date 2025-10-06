@@ -15,7 +15,7 @@ vfi_core = MultiScaleFlow(mamba_extractor(**backbone_cfg), **multiscale_cfg).to(
 # vfi_core.load_state_dict(torch.load(".../model.pkl"), strict=True)  # your weights
 
 # 2) build fusion
-B, N, H, W = 1, 3, 3048, 3048
+B, N, H, W = 1, 3, 3072, 3072
 fusion = build_fusion_net_vfi(
     base_channels=48,
     vfi_core=vfi_core,     # <-- real VFIMamba
