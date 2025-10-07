@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from model.vfimamba.feature_extractor import feature_extractor as mamba_extractor
 from model.vfimamba.flow_estimation import MultiScaleFlow
-from fusion_mamba import build_fusion_net_vfi
+from fusionmamba import build_fusion_net_vfi
 from config import init_model_config
 from model.loss.fusionloss import AnchorFusionLoss
 
@@ -73,7 +73,7 @@ def smoke_test_full():
     vfi_core.eval()  # Keep VFIMamba frozen
     
     # Build fusion model
-    B, N, H, W = 2, 3, 256, 256  # Smaller for smoke test
+    B, N, H, W = 1, 3, 3072, 3072  # Smaller for smoke test
     fusion = build_fusion_net_vfi(
         base_channels=48,
         vfi_core=vfi_core,
