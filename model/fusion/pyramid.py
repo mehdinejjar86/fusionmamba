@@ -102,9 +102,10 @@ Only the attention mechanism operates on wavelet-decomposed features.
 from pytorch_wavelets import DWTForward, DWTInverse
 class WaveletPyramidCrossAttention(nn.Module):
     """
-    Memory-efficient cross-attention using wavelet decomposition.
+    Memory-efficient cross-attention that PRESERVES multi-view awareness.
+    All anchors are processed together in the wavelet domain.
     """
-    def __init__(self, dim, num_heads=4, wavelet='haar', wavelet_level=2, 
+    def __init__(self, dim, num_heads=4, wavelet='haar', wavelet_level=1,
                  qkv_bias=True, attn_drop=0., proj_drop=0.):
         super().__init__()
         self.dim = dim
@@ -129,89 +130,95 @@ class WaveletPyramidCrossAttention(nn.Module):
         # Normalization
         self.norm = nn.GroupNorm(num_groups=min(32, dim // 4), num_channels=dim)
         
+        reduction = 2 ** (2 * wavelet_level)
         print(f"  Wavelet Pyramid Attention: {dim}D, level={wavelet_level}, "
-              f"reduction={2**(2*wavelet_level)}x")
-    
-    def _decompose_to_lowfreq(self, x):
-        """Decompose and extract low-frequency band."""
-        yl, yh = self.dwt(x)
-        return yl, yh
-    
-    def _reconstruct_from_lowfreq(self, yl, yh):
-        """Reconstruct from low-frequency and original high-frequency."""
-        return self.idwt((yl, yh))
+              f"reduction={reduction}x")
     
     def forward(self, query, key_value_multi, value_multi):
         """
+        Parallel multi-view wavelet attention.
+        
         Args:
             query: [B, C, H, W] - aggregated query
-            key_value_multi: [B, N, C, H, W] - key features from N anchors
-            value_multi: [B, N, C, H, W] - value features from N anchors
-        
+            key_value_multi: [B, N, C, H, W] - ALL anchor features
+            value_multi: [B, N, C, H, W]
         Returns:
-            output: [B, C, H, W] - fused features (NOT 5D!)
+            [B, C, H, W]
         """
         B, N, C, H, W = key_value_multi.shape
         
-        # === 1. Decompose query to wavelet domain ===
-        query_yl, query_yh = self._decompose_to_lowfreq(query)  # [B, C, H', W']
+        # === 1. Decompose query ===
+        query_yl, query_yh = self.dwt(query)  # [B, C, H', W']
         _, _, H_low, W_low = query_yl.shape
         
-        # === 2. Decompose all anchor key-values ===
-        kv_yl_list = []
-        kv_yh_list = []
+        # === 2. Decompose ALL anchors in parallel ===
+        # Flatten N into batch for efficient parallel wavelet transform
+        kv_flat = key_value_multi.view(B * N, C, H, W)  # [B*N, C, H, W]
+        kv_yl_flat, kv_yh_flat = self.dwt(kv_flat)      # [B*N, C, H', W']
         
-        for n in range(N):
-            kv_n = key_value_multi[:, n]  # [B, C, H, W]
-            kv_yl, kv_yh = self._decompose_to_lowfreq(kv_n)
-            kv_yl_list.append(kv_yl)
-            kv_yh_list.append(kv_yh)
+        # Reshape back to separate anchors
+        kv_yl = kv_yl_flat.view(B, N, C, H_low, W_low)  # [B, N, C, H', W']
         
-        # Stack: [B*N, C, H', W']
-        kv_yl_stacked = torch.cat(kv_yl_list, dim=0)  # [B*N, C, H', W']
+        # Free high-freq from anchors
+        del kv_yh_flat, kv_flat
         
-        # Repeat query for each anchor: [B*N, C, H', W']
-        query_yl_repeated = query_yl.repeat(N, 1, 1, 1)  # [B*N, C, H', W']
+        # === 3. Apply projections ===
+        q = self.q_proj(query_yl)  # [B, C, H', W']
         
-        # === 3. Cross-attention on LOW-FREQUENCY bands ===
-        # Apply Q, K, V projections
-        q = self.q_proj(query_yl_repeated)  # [B*N, C, H', W']
-        k = self.k_proj(kv_yl_stacked)      # [B*N, C, H', W']
-        v = self.v_proj(kv_yl_stacked)      # [B*N, C, H', W']
+        # Project all anchor keys/values in parallel
+        kv_yl_flat_for_proj = kv_yl.reshape(B * N, C, H_low, W_low)  # Use reshape
+        k_flat = self.k_proj(kv_yl_flat_for_proj)  # [B*N, C, H', W']
+        v_flat = self.v_proj(kv_yl_flat_for_proj)  # [B*N, C, H', W']
         
-        # Reshape for multi-head attention
-        BN = B * N
-        q = q.view(BN, self.num_heads, C // self.num_heads, H_low * W_low).transpose(2, 3)
-        k = k.view(BN, self.num_heads, C // self.num_heads, H_low * W_low).transpose(2, 3)
-        v = v.view(BN, self.num_heads, C // self.num_heads, H_low * W_low).transpose(2, 3)
+        del kv_yl_flat_for_proj
         
-        # Attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        # === 4. Reshape for multi-head attention ===
+        # Query: [B, num_heads, H'W', head_dim]
+        q = q.reshape(B, self.num_heads, C // self.num_heads, H_low * W_low)
+        q = q.transpose(2, 3)  # [B, heads, H'W', dim]
+        
+        # Keys: [B*N, C, H', W'] -> [B, N, heads, H'W', dim]
+        k = k_flat.reshape(B, N, C, H_low, W_low)
+        k = k.reshape(B, N, self.num_heads, C // self.num_heads, H_low, W_low)
+        k = k.reshape(B, N, self.num_heads, C // self.num_heads, H_low * W_low)
+        k = k.permute(0, 2, 1, 4, 3)  # [B, heads, N, H'W', dim]
+        k = k.reshape(B, self.num_heads, N * H_low * W_low, C // self.num_heads)  # [B, heads, N*H'W', dim]
+        
+        # Values: [B*N, C, H', W'] -> [B, N, heads, H'W', dim]
+        v = v_flat.reshape(B, N, C, H_low, W_low)
+        v = v.reshape(B, N, self.num_heads, C // self.num_heads, H_low, W_low)
+        v = v.reshape(B, N, self.num_heads, C // self.num_heads, H_low * W_low)
+        v = v.permute(0, 2, 1, 4, 3)  # [B, heads, N, H'W', dim]
+        v = v.reshape(B, self.num_heads, N * H_low * W_low, C // self.num_heads)  # [B, heads, N*H'W', dim]
+        
+        del k_flat, v_flat
+        
+        # === 5. Cross-attention across ALL anchors ===
+        # Attention: query [B, heads, H'W', dim] @ keys [B, heads, N*H'W', dim].T
+        attn = (q @ k.transpose(-2, -1)) * self.scale  # [B, heads, H'W', N*H'W']
         attn = F.softmax(attn, dim=-1)
         attn = self.attn_drop(attn)
         
         # Apply to values
-        out = attn @ v  # [B*N, heads, H'W', head_dim]
-        out = out.transpose(2, 3).contiguous().view(BN, C, H_low, W_low)
+        out = attn @ v  # [B, heads, H'W', dim]
+        out = out.transpose(2, 3).contiguous()  # [B, heads, dim, H'W']
+        out = out.reshape(B, C, H_low, W_low)
         
-        # Project output
+        del attn, k, v, q
+        
+        # === 6. Project output ===
         out = self.proj(out)
         out = self.proj_drop(out)
         
-        # === 4. Aggregate across anchors ===
-        # Reshape back to [B, N, C, H', W'] then mean across N
-        out = out.view(B, N, C, H_low, W_low).mean(dim=1)  # [B, C, H', W']
+        # === 7. Reconstruct to full resolution ===
+        out_full = self.idwt((out, query_yh))
+        del out, query_yh
         
-        # === 5. Reconstruct to full resolution ===
-        out_full = self._reconstruct_from_lowfreq(out, query_yh)  # [B, C, H, W]
-        
-        # Crop to original size (wavelet may change size slightly)
+        # Crop to original size
         out_full = out_full[:, :, :H, :W]
         
-        # === 6. Normalize and residual ===
+        # === 8. Normalize and residual ===
         out_full = self.norm(out_full)
+        out_full = out_full + query
         
-        # Final residual with original query (NOT key_value_multi!)
-        out_full = out_full + query  # [B, C, H, W]
-        
-        return out_full  # Must be [B, C, H, W]
+        return out_full
