@@ -73,7 +73,7 @@ def smoke_test_full():
     vfi_core.eval()  # Keep VFIMamba frozen
     
     # Build fusion model
-    B, N, H, W = 1, 3, 3072, 3072  # Smaller for smoke test
+    B, N, H, W = 1, 2, 3072, 3072  # Smaller for smoke test
     fusion = build_fusion_net_vfi(
         base_channels=48,
         vfi_core=vfi_core,
