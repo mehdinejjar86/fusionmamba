@@ -16,11 +16,12 @@ class VFIMambaAdapter(torch.nn.Module):
         down_scale: e.g., 1.0 (default), or 0.5 for memory
         local: whether to run local IFBlock refinement (True ≈ VFIMamba 'LOCAL' stages)
     """
-    def __init__(self, vfi_core, down_scale: float = 1.0, local: bool = False):
+    def __init__(self, vfi_core, freeze_vfi=True, down_scale: float = 1.0, local: bool = False):
         super().__init__()
         self.vfi = vfi_core
         self.down_scale = float(down_scale)
         self.local = bool(local)
+        self.freeze_vfi = bool(freeze_vfi)
 
     def forward(self, I0b, I1b, tb):
         """
@@ -54,7 +55,11 @@ class VFIMambaAdapter(torch.nn.Module):
                 tb_ = tb.view(BN, 1, 1, 1)
             else:
                 tb_ = tb
-            flow, mask = self.vfi.calculate_flow(imgs, tb_, local=self.local)
+            if self.freeze_vfi:
+                with torch.no_grad():
+                    flow, mask = self.vfi.calculate_flow(imgs, tb_, local=self.local)
+            else:
+                flow, mask = self.vfi.calculate_flow(imgs, tb_, local=self.local)
 
         # Return full-res flow/mask
         return flow, torch.sigmoid(mask)
