@@ -57,7 +57,7 @@ def test_loss_components(losses):
                 print(" ✓")
 
 
-def smoke_test_full():
+def smoke_test_full(B=1, N=3, H=256, W=256):
     """Complete smoke test: forward + loss + backward"""
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -73,7 +73,6 @@ def smoke_test_full():
     vfi_core.eval()  # Keep VFIMamba frozen
     
     # Build fusion model
-    B, N, H, W = 1, 2, 3072, 3072  # Smaller for smoke test
     fusion = build_fusion_net_vfi(
         base_channels=48,
         vfi_core=vfi_core,
@@ -160,7 +159,7 @@ def smoke_test_full():
     return True
 
 
-def test_with_gan():
+def test_with_gan(B=1, N=3, H=256, W=256):
     """Extended test with GAN discriminator"""
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -172,7 +171,6 @@ def test_with_gan():
     backbone_cfg, multiscale_cfg = init_model_config(F=16, depth=[2,2,2,3,3], M=False)
     vfi_core = MultiScaleFlow(mamba_extractor(**backbone_cfg), **multiscale_cfg).to(device).train()
     
-    B, N, H, W = 1, 3, 3072, 3072
     fusion = build_fusion_net_vfi(base_channels=48, vfi_core=vfi_core).to(device).train()
     
     # Loss with GAN
@@ -226,6 +224,10 @@ def test_with_gan():
 
 
 if __name__ == "__main__":
+    B = 1
+    N = 2  # More anchors for GAN test
+    H = 3072  # Use smaller size for smoke test
+    W = 3072
     # Basic test
     success = smoke_test_full()
     
