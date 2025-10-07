@@ -225,15 +225,15 @@ def test_with_gan(B=1, N=3, H=256, W=256):
 
 if __name__ == "__main__":
     B = 1
-    N = 2  # More anchors for GAN test
-    H = 3072  # Use smaller size for smoke test
+    N = 2  
+    H = 3072 
     W = 3072
     # Basic test
-    success = smoke_test_full()
+    success = smoke_test_full(B, N, H, W)
     
     # Optional: Test with GAN
     if success:
         print("\n" + "="*60)
         response = input("Run GAN test? (y/n): ")
         if response.lower() == 'y':
-            test_with_gan()
+            test_with_gan(B, N, H, W)
