@@ -8,7 +8,7 @@ from model.vfimamba.vfi_adapter import VFIMambaAdapter
 from model.vfimamba.warplayer import warp as warp_vfi 
 from model.fusion.utils import ConvBlock, LearnedUpsampling, DetailAwareResBlock
 from model.fusion.temporal import TemporalWeightingMLP
-from model.fusion.pyramid import PyramidCrossAttention
+from model.fusion.pyramid import PyramidCrossAttention, SlidingWindowPyramidAttention
 
 
 class AnchorFusionNetVFI(nn.Module):
@@ -18,14 +18,15 @@ class AnchorFusionNetVFI(nn.Module):
     - Temporal weights are used ONLY in fusion (not in motion)
     - Works with variable N (including N=1)
     """
-    def __init__(self, base_channels=64,
-                 vfi_core=None, vfi_down_scale=1.0, vfi_local=False):
+    def __init__(self, base_channels=64, window_mode=False, 
+                 vfi_core=None, vfi_down_scale=1.0, vfi_local=False, freeze_vfi=True):
         super().__init__()
         assert vfi_core is not None, "vfi_core (VFIMamba) must be provided"
         self.base_channels = base_channels
+        self.window_mode = window_mode
 
         # Motion prior (real VFIMamba)
-        self.vfi_head = VFIMambaAdapter(vfi_core, down_scale=vfi_down_scale, local=vfi_local)
+        self.vfi_head = VFIMambaAdapter(vfi_core, down_scale=vfi_down_scale, local=vfi_local, freeze_vfi=freeze_vfi)
 
         # Encoder (shared for all anchors) – Slim+ inputs: P(3)+M(1)+pe0(1)+pe1(1)+|f|(1) = 7
         enc_in = 7
@@ -49,10 +50,16 @@ class AnchorFusionNetVFI(nn.Module):
             )
         })
 
+
         # Cross-anchor deformable attention
-        self.cross_low  = PyramidCrossAttention(2*C, num_heads=4)
-        self.cross_mid  = PyramidCrossAttention(4*C, num_heads=4)
-        self.cross_high = PyramidCrossAttention(8*C, num_heads=4)
+        if self.window_mode:
+            self.cross_low  = SlidingWindowPyramidAttention(2*C, num_heads=4, window_size=8, shift_size=4)
+            self.cross_mid  = SlidingWindowPyramidAttention(4*C, num_heads=4, window_size=8, shift_size=4)
+            self.cross_high = SlidingWindowPyramidAttention(8*C, num_heads=4, window_size=8, shift_size=4)
+        else:
+            self.cross_low  = PyramidCrossAttention(2*C, num_heads=4)
+            self.cross_mid  = PyramidCrossAttention(4*C, num_heads=4)
+            self.cross_high = PyramidCrossAttention(8*C, num_heads=4)
 
         # Decoder
         self.up_high_to_mid = nn.Sequential(
@@ -248,11 +255,13 @@ class AnchorFusionNetVFI(nn.Module):
 
 
 # ---------- factory ----------
-def build_fusion_net_vfi(base_channels=64,
-                         vfi_core=None, vfi_down_scale=1.0, vfi_local=False):
+def build_fusion_net_vfi(base_channels=64, window_mode=True,
+                         vfi_core=None, vfi_down_scale=1.0, vfi_local=False, freeze_vfi=True):
     return AnchorFusionNetVFI(
         base_channels=base_channels,
+        window_mode=window_mode,
         vfi_core=vfi_core,
         vfi_down_scale=vfi_down_scale,
         vfi_local=vfi_local,
+        freeze_vfi=freeze_vfi
     )
